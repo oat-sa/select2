@@ -1,7 +1,7 @@
 /*
 Copyright 2012 Igor Vaynberg
 
-Version: 3.5.1 Timestamp: Tue Jul 22 18:58:56 EDT 2014
+Version: release-3.5.1-tao1 Timestamp: 2025-01-29
 
 This software is licensed under the Apache License, Version 2.0 (the "Apache License") or the GNU
 General Public License version 2 (the "GPL License"). You may choose either license to govern your
@@ -657,6 +657,10 @@ the specific language governing permissions and limitations under the Apache Lic
         });
     }
 
+    function getWritingMode($element) {
+        return getComputedStyle($element.get(0)).getPropertyValue('writing-mode');
+    }
+
     /**
      * Creates a new class
      *
@@ -738,6 +742,9 @@ the specific language governing permissions and limitations under the Apache Lic
             syncCssClasses(this.dropdown, this.opts.element, this.opts.adaptDropdownCssClass);
 
             this.dropdown.addClass(evaluate(opts.dropdownCssClass, this.opts.element));
+            if (opts.isVerticalRlWritingMode) {
+                this.dropdown.addClass('writing-mode-vertical-rl');
+            }
             this.dropdown.data("select2", this);
             this.dropdown.on("click", killEvent);
 
@@ -1221,6 +1228,11 @@ the specific language governing permissions and limitations under the Apache Lic
 
         // abstract
         positionDropdown: function() {
+            if (this.opts.isVerticalRlWritingMode) {
+                this.positionDropdownVerticalRl();
+                return;
+            }
+
             var $dropdown = this.dropdown,
                 offset = this.container.offset(),
                 height = this.container.outerHeight(false),
@@ -1320,6 +1332,106 @@ the specific language governing permissions and limitations under the Apache Lic
             else {
                 css.top = dropTop;
                 css.bottom = 'auto';
+                this.container.removeClass("select2-drop-above");
+                $dropdown.removeClass("select2-drop-above");
+            }
+            css = $.extend(css, evaluate(this.opts.dropdownCss, this.opts.element));
+
+            $dropdown.css(css);
+        },
+
+        // abstract
+        positionDropdownVerticalRl: function() {
+            var $dropdown = this.dropdown,
+                offset = this.container.offset(),
+                height = this.container.outerHeight(false),
+                width = this.container.outerWidth(false),
+                dropHeight = $dropdown.outerHeight(false),
+                dropWidth = $dropdown.outerWidth(false),
+                $window = $(window),
+                windowWidth = $window.width(),
+                windowHeight = $window.height(),
+                viewportRight = $window.scrollLeft() + windowWidth,
+                viewportBottom = $window.scrollTop() + windowHeight,
+                dropTop = offset.top,
+                dropLeft = offset.left,
+                enoughRoomToTheLeft = dropLeft - dropWidth >= $window.scrollLeft(),
+                enoughRoomToTheRight = (offset.left + width + dropWidth) <= viewportRight,
+                enoughRoomOnBottom = dropTop + dropHeight <= viewportBottom,
+                toTheRightNow = $dropdown.hasClass("select2-drop-above"),
+                bodyOffset,
+                toTheRight,
+                changeDirection,
+                css,
+                resultsListNode;
+
+            // above = to the right; below = to the left
+            // always prefer the current above/below alignment, unless there is not enough room
+            if (toTheRightNow) {
+                toTheRight = true;
+                if (!enoughRoomToTheRight && enoughRoomToTheLeft) {
+                    changeDirection = true;
+                    toTheRight = false;
+                }
+            } else {
+                toTheRight = false;
+                if (!enoughRoomToTheLeft && enoughRoomToTheRight) {
+                    changeDirection = true;
+                    toTheRight = true;
+                }
+            }
+
+            //if we are changing direction we need to get positions when dropdown is hidden;
+            if (changeDirection) {
+                $dropdown.hide();
+                offset = this.container.offset();
+                height = this.container.outerHeight(false);
+                width = this.container.outerWidth(false);
+                dropHeight = $dropdown.outerHeight(false);
+                viewportRight = $window.scrollLeft() + windowWidth;
+                viewportBottom = $window.scrollTop() + windowHeight;
+                dropTop = offset.top;
+                dropLeft = offset.left;
+                dropWidth = $dropdown.outerWidth(false);
+                enoughRoomOnBottom = dropTop + dropHeight <= viewportBottom;
+                $dropdown.show();
+
+                // fix so the cursor does not move to the left within the search-textbox in IE
+                this.focusSearch();
+            }
+
+            if (this.opts.dropdownAutoWidth) {
+                //not implemented
+            }
+            else {
+                this.container.removeClass('select2-drop-auto-width');
+            }
+
+            // fix positioning when body has an offset and is not position: static
+            if (this.body.css('position') !== 'static') {
+                bodyOffset = this.body.offset();
+                dropTop -= bodyOffset.top;
+                dropLeft -= bodyOffset.left;
+            }
+
+            if (!enoughRoomOnBottom) {
+                dropTop = offset.top + this.container.outerHeight(false) - dropHeight;
+            }
+
+            css =  {
+                top: dropTop,
+                height: height
+            };
+
+            if (toTheRight) {
+                css.left = offset.left + width;
+                css.right = 'auto';
+                this.container.addClass("select2-drop-above");
+                $dropdown.addClass("select2-drop-above");
+            }
+            else {
+                css.left = offset.left - dropWidth;
+                css.right = 'auto';
                 this.container.removeClass("select2-drop-above");
                 $dropdown.removeClass("select2-drop-above");
             }
@@ -1493,6 +1605,11 @@ the specific language governing permissions and limitations under the Apache Lic
 
         // abstract
         ensureHighlightVisible: function () {
+            if (this.opts.isVerticalRlWritingMode) {
+                this.ensureHighlightVisibleVerticalRl();
+                return;
+            }
+
             var results = this.results, children, index, child, hb, rb, y, more, topOffset;
 
             index = this.highlight();
@@ -1534,6 +1651,52 @@ the specific language governing permissions and limitations under the Apache Lic
             // make sure the top of the element is visible
             if (y < 0 && child.css('display') != 'none' ) {
                 results.scrollTop(results.scrollTop() + y); // y is negative
+            }
+        },
+
+          // abstract
+          ensureHighlightVisibleVerticalRl: function () {
+            var results = this.results, children, index, child, hl, rl, x, more, rightOffset;
+
+            index = this.highlight();
+
+            if (index < 0) return;
+
+            if (index == 0) {
+
+                // if the first element is highlighted scroll all the way to the top,
+                // that way any unselectable headers above it will also be scrolled
+                // into view
+
+                results.scrollLeft(0);
+                return;
+            }
+
+            children = this.findHighlightableChoices().find('.select2-result-label');
+
+            child = $(children[index]);
+
+            hl = ((child.offset() || {}).left || 0);
+
+            rightOffset = hl + child.outerWidth(true);
+
+            // if this is the last child lets also make sure select2-more-results is visible
+            if (index === children.length - 1) {
+                more = results.find("li.select2-more-results");
+                if (more.length > 0) {
+                    hl = more.offset().left;
+                }
+            }
+
+            rl = results.offset().left - 1;  //minus small margin, otherwise will autoscroll to next option if mouse is on the left border
+            if (hl < rl) {
+                results.scrollLeft(results.scrollLeft() + (hl - rl));
+            }
+            x = rightOffset - (results.offset().left + results.outerWidth(false));
+
+            // make sure the right of the element is visible
+            if (x > 0 && child.css('display') != 'none' ) {
+                results.scrollLeft(results.scrollLeft() + x); // x is positive, scrollLeft is negative
             }
         },
 
@@ -1933,7 +2096,11 @@ the specific language governing permissions and limitations under the Apache Lic
 
             var width = resolveContainerWidth.call(this);
             if (width !== null) {
-                this.container.css("width", width);
+                if (this.opts.isVerticalRlWritingMode) {
+                    this.container.css("height", width);
+                } else {
+                    this.container.css("width", width);
+                }
             }
         }
     });
@@ -2129,8 +2296,17 @@ the specific language governing permissions and limitations under the Apache Lic
                 switch (e.which) {
                     case KEY.UP:
                     case KEY.DOWN:
-                        this.moveHighlight((e.which === KEY.UP) ? -1 : 1);
-                        killEvent(e);
+                        if (!this.opts.isVerticalRlWritingMode) {
+                            this.moveHighlight((e.which === KEY.UP) ? -1 : 1);
+                            killEvent(e);
+                        }
+                        return;
+                    case KEY.LEFT:
+                    case KEY.RIGHT:
+                        if (this.opts.isVerticalRlWritingMode) {
+                            this.moveHighlight((e.which === KEY.RIGHT) ? -1 : 1);
+                            killEvent(e);
+                        }
                         return;
                     case KEY.ENTER:
                         this.selectHighlighted();
@@ -3367,6 +3543,8 @@ the specific language governing permissions and limitations under the Apache Lic
                     multiple = opts.multiple || false;
                     if ("tags" in opts) {opts.multiple = multiple = true;}
                 }
+
+                opts.isVerticalRlWritingMode = getWritingMode(opts.element) === 'vertical-rl';
 
                 select2 = multiple ? new window.Select2["class"].multi() : new window.Select2["class"].single();
                 select2.init(opts);
